@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="referrer" content="no-referrer">
+  <title>Procurement Tracker — Camera QR Scanner</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;color:#172033;background:#f4f7fb}
+    *{box-sizing:border-box}
+    body{margin:0;min-height:100vh;background:linear-gradient(180deg,#fff7ed 0,#f8fafc 38%,#eef2f7 100%)}
+    .wrap{width:min(760px,100%);margin:0 auto;padding:18px 14px 28px}
+    .card{background:#fff;border:1px solid #e5e7eb;border-radius:18px;box-shadow:0 18px 50px rgba(15,23,42,.10);overflow:hidden}
+    .head{padding:18px 18px 14px;border-bottom:1px solid #eef0f3}
+    h1{font-size:20px;margin:0;font-weight:850}
+    .sub{font-size:12px;color:#64748b;margin-top:5px;line-height:1.55}
+    .status{margin:14px 18px 0;padding:10px 12px;border-radius:10px;background:#eff6ff;color:#1d4ed8;font-size:13px;line-height:1.5}
+    .status.ok{background:#ecfdf5;color:#047857}.status.err{background:#fef2f2;color:#b91c1c}.status.warn{background:#fff7ed;color:#c2410c}
+    .reader-wrap{padding:14px 18px 4px}
+    #reader{width:100%;min-height:260px;background:#0f172a;border-radius:14px;overflow:hidden;display:flex;align-items:center;justify-content:center;color:#cbd5e1}
+    #reader video{object-fit:cover!important}
+    .controls{display:flex;gap:8px;flex-wrap:wrap;padding:12px 18px 0}
+    button,.file-btn,select,input[type=text]{border-radius:10px;border:1px solid #cbd5e1;font:inherit}
+    button,.file-btn{padding:10px 13px;background:#fff;color:#172033;font-weight:750;cursor:pointer}
+    button.primary{background:#ea580c;color:#fff;border-color:#ea580c}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    select{padding:9px 10px;background:#fff;min-width:180px;max-width:100%}
+    .fallback{margin:16px 18px 18px;padding-top:14px;border-top:1px solid #eef0f3}
+    .fallback-title{font-size:12px;font-weight:800;margin-bottom:8px}
+    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    input[type=text]{padding:10px 11px;min-width:0;flex:1 1 340px}
+    input[type=file]{display:none}
+    .help{font-size:11px;color:#64748b;line-height:1.65;margin-top:12px}
+    .foot{text-align:center;color:#94a3b8;font-size:10px;margin-top:12px}
+    @media(max-width:560px){.wrap{padding:0}.card{border-radius:0;min-height:100vh;border-left:0;border-right:0}.reader-wrap{padding-left:10px;padding-right:10px}#reader{min-height:52vh;border-radius:12px}.controls,.status,.fallback{margin-left:10px;margin-right:10px;padding-left:0;padding-right:0}.status{padding:10px 12px}.head{padding-left:14px;padding-right:14px}}
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="card">
+      <header class="head">
+        <h1>📷 สแกน QR งานด้วยกล้อง</h1>
+        <div class="sub">กล้องทำงานบนหน้า HTTPS แยกจาก Apps Script iframe · เมื่ออ่านสำเร็จจะกลับเข้า Procurement Tracker เพื่อตรวจ Signature และสิทธิ์ตามระบบเดิม</div>
+      </header>
+
+      <div id="status" class="status">พร้อม — กด “เปิดกล้อง” เพื่อขออนุญาตใช้กล้อง</div>
+
+      <div class="reader-wrap">
+        <div id="reader">กล้องยังไม่เปิด</div>
+      </div>
+
+      <div class="controls">
+        <button id="startBtn" class="primary" type="button">📷 เปิดกล้อง</button>
+        <button id="stopBtn" type="button" disabled>■ ปิดกล้อง</button>
+        <select id="cameraSelect" aria-label="เลือกกล้อง" style="display:none"></select>
+      </div>
+
+      <div class="fallback">
+        <div class="fallback-title">วิธีสำรอง</div>
+        <div class="row">
+          <label class="file-btn" for="imageInput">🖼 เลือกรูป QR</label>
+          <input id="imageInput" type="file" accept="image/*">
+        </div>
+        <div class="row" style="margin-top:9px">
+          <input id="pasteInput" type="text" autocomplete="off" spellcheck="false" placeholder="วาง Signed QR URL">
+          <button id="openPasteBtn" type="button">ตรวจและเปิด</button>
+        </div>
+        <div class="help">
+          ถ้ากล้องถูกปฏิเสธ ให้เปิดสิทธิ์ Camera ของเว็บไซต์นี้ใน Browser แล้วลองใหม่ หน้า Scanner ไม่เก็บภาพและไม่ส่งภาพไปยัง Procurement Tracker; ใช้เฉพาะการอ่าน QR บนอุปกรณ์เท่านั้น
+        </div>
+      </div>
+    </section>
+    <div class="foot">PT-V4.10.9A-CAMERA-SCANNER-BRIDGE-1</div>
+  </main>
+
+<script>
+(function(){
+  'use strict';
+
+  var LIBS = [
+    'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js',
+    'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js'
+  ];
+  var scanner = null;
+  var scannerRunning = false;
+  var busy = false;
+  var cameras = [];
+  var expectedAppBase = '';
+
+  var statusEl = document.getElementById('status');
+  var startBtn = document.getElementById('startBtn');
+  var stopBtn = document.getElementById('stopBtn');
+  var cameraSelect = document.getElementById('cameraSelect');
+  var imageInput = document.getElementById('imageInput');
+  var pasteInput = document.getElementById('pasteInput');
+  var openPasteBtn = document.getElementById('openPasteBtn');
+
+  function setStatus(msg, type){
+    statusEl.textContent = String(msg || '');
+    statusEl.className = 'status' + (type ? ' ' + type : '');
+  }
+
+  function normalizeAppsScriptBase(raw){
+    var u = new URL(String(raw || '').trim());
+    if (u.protocol !== 'https:' || u.hostname !== 'script.google.com') {
+      throw new Error('App URL ต้องเป็น https://script.google.com');
+    }
+    if (!/^\/macros\/s\/[^/]+\/(?:dev|exec)$/.test(u.pathname)) {
+      throw new Error('App URL ไม่ใช่ Apps Script Web App /dev หรือ /exec');
+    }
+    return u.origin + u.pathname;
+  }
+
+  function initExpectedApp(){
+    try{
+      var q = new URLSearchParams(location.search || '');
+      expectedAppBase = normalizeAppsScriptBase(q.get('app') || '');
+      return true;
+    }catch(err){
+      setStatus('เปิด Scanner ไม่สมบูรณ์: ' + (err && err.message ? err.message : err), 'err');
+      startBtn.disabled = true;
+      openPasteBtn.disabled = true;
+      return false;
+    }
+  }
+
+  function parseAndValidateQr(text){
+    var raw = String(text || '').trim();
+    if (!raw) return {ok:false, message:'ยังไม่มีข้อมูล QR'};
+
+    var u;
+    try{ u = new URL(raw); }
+    catch(_e){ return {ok:false, message:'ข้อมูลที่อ่านได้ไม่ใช่ URL'}; }
+
+    var base;
+    try{ base = normalizeAppsScriptBase(u.origin + u.pathname); }
+    catch(_e2){ return {ok:false, message:'QR นี้ไม่ใช่ Apps Script URL ของ Procurement Tracker'}; }
+
+    if (base !== expectedAppBase) {
+      return {ok:false, message:'QR นี้มาจาก Web App คนละ Deployment'};
+    }
+
+    var pt = String(u.searchParams.get('pt') || '').toLowerCase();
+    var jobId = String(u.searchParams.get('job') || '').trim().toUpperCase();
+    var qv = String(u.searchParams.get('qv') || '').trim();
+    var sig = String(u.searchParams.get('sig') || '').trim();
+
+    if (pt !== 'qr' || !jobId || !qv || !sig) {
+      return {ok:false, message:'QR นี้ไม่มี Signed Job payload ที่ระบบต้องใช้'};
+    }
+
+    return {ok:true, raw:raw, jobId:jobId};
+  }
+
+  function loadScript(src){
+    return new Promise(function(resolve, reject){
+      var s = document.createElement('script');
+      s.src = src;
+      s.async = true;
+      s.onload = resolve;
+      s.onerror = function(){ reject(new Error('โหลด ' + src + ' ไม่สำเร็จ')); };
+      document.head.appendChild(s);
+    });
+  }
+
+  function ensureLibrary(){
+    if (window.Html5Qrcode) return Promise.resolve();
+    var i = 0;
+    function next(){
+      if (i >= LIBS.length) return Promise.reject(new Error('โหลด QR scanner library ไม่สำเร็จ'));
+      var src = LIBS[i++];
+      return loadScript(src).then(function(){
+        if (!window.Html5Qrcode) throw new Error('Library loaded but Html5Qrcode missing');
+      }).catch(function(){ return next(); });
+    }
+    return next();
+  }
+
+  function choosePreferredCamera(list){
+    if (!list || !list.length) return '';
+    var rear = list.find(function(c){ return /back|rear|environment|หลัง/i.test(c.label || ''); });
+    return (rear || list[list.length - 1]).id;
+  }
+
+  function renderCameraSelect(list, selectedId){
+    cameraSelect.innerHTML = '';
+    (list || []).forEach(function(c, idx){
+      var opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = c.label || ('Camera ' + (idx + 1));
+      if (c.id === selectedId) opt.selected = true;
+      cameraSelect.appendChild(opt);
+    });
+    cameraSelect.style.display = list && list.length > 1 ? '' : 'none';
+  }
+
+  function scanConfig(){
+    return {
+      fps: 10,
+      qrbox: function(w, h){
+        var side = Math.max(180, Math.min(Math.floor(Math.min(w, h) * 0.72), 330));
+        return {width:side, height:side};
+      },
+      aspectRatio: 1.333333,
+      disableFlip: false
+    };
+  }
+
+  function startWithCamera(cameraId){
+    if (!scanner) scanner = new Html5Qrcode('reader', {formatsToSupport:[Html5QrcodeSupportedFormats.QR_CODE]}, false);
+    busy = false;
+    setStatus('กำลังเปิดกล้อง… หาก Browser ถามสิทธิ์ให้กดอนุญาต', '');
+    startBtn.disabled = true;
+
+    return scanner.start(
+      cameraId,
+      scanConfig(),
+      function(decodedText){ handleDecoded(decodedText, 'CAMERA'); },
+      function(){ /* no QR in current frame */ }
+    ).then(function(){
+      scannerRunning = true;
+      stopBtn.disabled = false;
+      setStatus('กล้องพร้อม — เล็ง QR ให้อยู่ในกรอบ', 'ok');
+    }).catch(function(err){
+      scannerRunning = false;
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      var msg = (err && err.message) ? err.message : String(err || 'unknown error');
+      setStatus('เปิดกล้องไม่สำเร็จ: ' + msg + ' — ตรวจสิทธิ์ Camera ของ Browser', 'err');
+      throw err;
+    });
+  }
+
+  function startCamera(){
+    if (busy || scannerRunning) return;
+    if (!expectedAppBase) return;
+    busy = true;
+    setStatus('กำลังขอสิทธิ์และค้นหากล้อง…', '');
+
+    ensureLibrary()
+      .then(function(){ return Html5Qrcode.getCameras(); })
+      .then(function(list){
+        cameras = list || [];
+        if (!cameras.length) throw new Error('ไม่พบกล้องบนอุปกรณ์');
+        var id = choosePreferredCamera(cameras);
+        renderCameraSelect(cameras, id);
+        return startWithCamera(id);
+      })
+      .catch(function(err){
+        if (!scannerRunning) {
+          var msg = (err && err.message) ? err.message : String(err || 'unknown error');
+          setStatus('ไม่สามารถใช้กล้องได้: ' + msg, 'err');
+        }
+      })
+      .finally(function(){ busy = false; });
+  }
+
+  function stopCamera(){
+    if (!scanner || !scannerRunning) {
+      scannerRunning = false;
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      return Promise.resolve();
+    }
+    return scanner.stop().catch(function(){}).then(function(){
+      scannerRunning = false;
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      setStatus('ปิดกล้องแล้ว', '');
+    });
+  }
+
+  function handleDecoded(text, source){
+    if (busy) return;
+    var parsed = parseAndValidateQr(text);
+    if (!parsed.ok) {
+      setStatus(parsed.message + ' — กรุณาลอง QR ของ Procurement Tracker', 'warn');
+      return;
+    }
+
+    busy = true;
+    setStatus('อ่านได้ ' + parsed.jobId + ' — กำลังกลับเข้า Procurement Tracker เพื่อตรวจสิทธิ์…', 'ok');
+
+    Promise.resolve(scannerRunning ? stopCamera() : null).finally(function(){
+      setTimeout(function(){ location.assign(parsed.raw); }, 180);
+    });
+  }
+
+  function scanImage(file){
+    if (!file || busy) return;
+    busy = true;
+    setStatus('กำลังอ่าน QR จากรูป…', '');
+
+    ensureLibrary()
+      .then(function(){ return scannerRunning ? stopCamera() : null; })
+      .then(function(){
+        if (!scanner) scanner = new Html5Qrcode('reader', {formatsToSupport:[Html5QrcodeSupportedFormats.QR_CODE]}, false);
+        return scanner.scanFile(file, true);
+      })
+      .then(function(text){ busy = false; handleDecoded(text, 'IMAGE'); })
+      .catch(function(err){
+        busy = false;
+        setStatus('อ่าน QR จากรูปไม่สำเร็จ: ' + ((err && err.message) ? err.message : err), 'err');
+      })
+      .finally(function(){ imageInput.value = ''; });
+  }
+
+  startBtn.addEventListener('click', startCamera);
+  stopBtn.addEventListener('click', stopCamera);
+  cameraSelect.addEventListener('change', function(){
+    var id = cameraSelect.value;
+    if (!id) return;
+    busy = true;
+    stopCamera().then(function(){ return startWithCamera(id); }).finally(function(){ busy = false; });
+  });
+  imageInput.addEventListener('change', function(){ scanImage(this.files && this.files[0]); });
+  openPasteBtn.addEventListener('click', function(){ handleDecoded(pasteInput.value, 'PASTE'); });
+  pasteInput.addEventListener('keydown', function(ev){
+    if (ev.key === 'Enter') { ev.preventDefault(); handleDecoded(pasteInput.value, 'PASTE'); }
+  });
+  window.addEventListener('pagehide', function(){ if (scannerRunning && scanner) scanner.stop().catch(function(){}); });
+
+  initExpectedApp();
+})();
+</script>
+</body>
+</html>

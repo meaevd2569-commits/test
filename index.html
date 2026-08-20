@@ -115,17 +115,17 @@
         <input id="imageInput" type="file" accept="image/*">
       </div>
       <div class="row" style="margin-top:9px">
-        <input id="pasteInput" type="text" autocomplete="off" spellcheck="false" placeholder="วาง Signed QR URL">
+        <input id="pasteInput" type="text" autocomplete="off" spellcheck="false" placeholder="Signed QR URL จะขึ้นที่นี่หลังสแกนสำเร็จ">
         <button id="openPasteBtn" type="button">ตรวจและเปิด</button>
       </div>
       <div class="help">
-        QR ที่พิมพ์จาก Procurement Tracker ใช้งานได้ หากเปิดผ่าน LINE แล้วกล้องถูกปฏิเสธ
+        เมื่อสแกนสำเร็จ ระบบจะใส่ Signed QR URL ลงช่องด้านบนก่อน แล้วให้กด “ตรวจและเปิด” เพื่อเข้า JOB หากเปิดผ่าน LINE แล้วกล้องถูกปฏิเสธ
         ให้เปิดด้วย Chrome/Browser ภายนอก สำหรับ Live Scan แนะนำให้ QR กินพื้นที่ประมาณ 40–70% ของภาพและถือให้นิ่ง
       </div>
       <div id="diag" class="diag"></div>
     </div>
   </section>
-  <div class="foot">PT-V4.10.9A.5-HYBRID-DEPLOYMENT-REBASE</div>
+  <div class="foot">PT-V4.10.9A.6-DECODE-TO-FIELD</div>
 </main>
 
 <canvas id="workCanvas"></canvas>
@@ -134,7 +134,7 @@
 (function(){
 'use strict';
 
-var VERSION='PT-V4.10.9A.5-HYBRID-DEPLOYMENT-REBASE';
+var VERSION='PT-V4.10.9A.6-DECODE-TO-FIELD';
 var JSQR_URLS=[
   'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js',
   'https://unpkg.com/jsqr@1.4.0/dist/jsQR.js'
@@ -551,6 +551,58 @@ function showDetected(parsed){
   detected.classList.add('show');
 }
 
+function openParsedQrV4109_(parsed){
+  if(!parsed || !parsed.ok || !parsed.raw) return;
+
+  busy=true;
+  detected.classList.add('show');
+  detectedJob.textContent=parsed.jobId+' — กำลังเปิด Procurement Tracker';
+
+  setStatus(
+    'กำลังเปิด '+parsed.jobId+' เพื่อตรวจ Signature และสิทธิ์ใน Procurement Tracker…',
+    'ok'
+  );
+
+  setTimeout(function(){
+    location.assign(parsed.raw);
+  },220);
+}
+
+function stageDecodedQrV4109_(parsed){
+  running=false;
+  clearTimeout(loopTimer);
+  stopTracks();
+
+  // สำคัญ: เอา Signed URL ที่อ่านได้ (หรือ URL ที่ rebase แล้ว) ใส่ช่องให้เห็นก่อน
+  pasteInput.value=parsed.raw;
+  pasteInput.setAttribute('data-job-id',parsed.jobId||'');
+  pasteInput.setAttribute('data-deployment-rebased',parsed.deploymentRebased?'1':'0');
+
+  openPasteBtn.disabled=false;
+  openPasteBtn.textContent='ตรวจและเปิด '+parsed.jobId;
+
+  detected.classList.add('show');
+  detectedJob.textContent=parsed.jobId+' — Signed QR URL พร้อมแล้ว';
+
+  setStatus(
+    parsed.deploymentRebased
+      ? '✅ อ่านสำเร็จ '+parsed.jobId+' — QR เดิมถูกย้ายฐานมายัง Web App ปัจจุบันแล้ว กด “ตรวจและเปิด” เพื่อเข้า JOB'
+      : '✅ อ่านสำเร็จ '+parsed.jobId+' — Signed QR URL ถูกใส่ในช่องแล้ว กด “ตรวจและเปิด” เพื่อเข้า JOB',
+    'ok'
+  );
+
+  busy=false;
+
+  setTimeout(function(){
+    detected.classList.remove('show');
+    try{
+      pasteInput.scrollIntoView({behavior:'smooth',block:'center'});
+      pasteInput.focus();
+      pasteInput.select();
+    }catch(_e){}
+  },900);
+}
+
 function handleDecoded(text,source){
   if(busy)return;
 
@@ -560,22 +612,15 @@ function handleDecoded(text,source){
     return;
   }
 
+  // CAMERA / IMAGE: อ่านสำเร็จแล้ว ให้แสดง Signed URL ก่อน
+  // PASTE: ผู้ใช้กด "ตรวจและเปิด" แล้วจึงค่อยไป Web App
+  if(String(source||'').toUpperCase()==='PASTE'){
+    openParsedQrV4109_(parsed);
+    return;
+  }
+
   busy=true;
-  running=false;
-  clearTimeout(loopTimer);
-  showDetected(parsed);
-  setStatus(
-    parsed.deploymentRebased
-      ? '✅ อ่านสำเร็จ '+parsed.jobId+' — พบ QR จาก Deployment เดิม ระบบกำลังย้ายไป Web App ปัจจุบันเพื่อตรวจ Signature และสิทธิ์…'
-      : '✅ อ่านสำเร็จ '+parsed.jobId+' — กำลังกลับเข้า Procurement Tracker เพื่อตรวจ Signature และสิทธิ์…',
-    'ok'
-  );
-
-  stopTracks();
-
-  setTimeout(function(){
-    location.assign(parsed.raw);
-  },350);
+  stageDecodedQrV4109_(parsed);
 }
 
 async function decodeBitmapWithNative(bitmap){

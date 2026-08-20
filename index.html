@@ -125,7 +125,7 @@
       <div id="diag" class="diag"></div>
     </div>
   </section>
-  <div class="foot">PT-V4.10.9A.4-HYBRID-NATIVE-JSQR</div>
+  <div class="foot">PT-V4.10.9A.5-HYBRID-DEPLOYMENT-REBASE</div>
 </main>
 
 <canvas id="workCanvas"></canvas>
@@ -134,7 +134,7 @@
 (function(){
 'use strict';
 
-var VERSION='PT-V4.10.9A.4-HYBRID-NATIVE-JSQR';
+var VERSION='PT-V4.10.9A.5-HYBRID-DEPLOYMENT-REBASE';
 var JSQR_URLS=[
   'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js',
   'https://unpkg.com/jsqr@1.4.0/dist/jsQR.js'
@@ -229,10 +229,6 @@ function parseAndValidateQr(text){
   try{base=normalizeAppsScriptBase(u.origin+u.pathname);}
   catch(_e2){return{ok:false,message:'QR นี้ไม่ใช่ Apps Script URL ของ Procurement Tracker'};}
 
-  if(base!==expectedAppBase){
-    return{ok:false,message:'QR นี้มาจาก Web App คนละ Deployment'};
-  }
-
   var pt=String(u.searchParams.get('pt')||'').toLowerCase();
   var jobId=String(u.searchParams.get('job')||'').trim().toUpperCase();
   var qv=String(u.searchParams.get('qv')||'').trim();
@@ -241,7 +237,30 @@ function parseAndValidateQr(text){
   if(pt!=='qr'||!jobId||!qv||!sig){
     return{ok:false,message:'QR นี้ไม่มี Signed Job payload ที่ระบบต้องใช้'};
   }
-  return{ok:true,raw:raw,jobId:jobId,qv:qv,sig:sig};
+
+  // V4.10.9A.5 — Backward-compatible Deployment Rebase
+  // Signature ของ Procurement Tracker ผูกกับ qv + JOB_ID ไม่ได้ผูกกับ base URL.
+  // ถ้า QR ถูกพิมพ์จาก Deployment เก่า ให้คง payload เดิม แต่พากลับเข้า
+  // Web App ปัจจุบันจากค่า ?app=... แล้วให้ Backend ตรวจ Signature + Visibility อีกครั้ง.
+  var deploymentRebased=(base!==expectedAppBase);
+  var safeRaw=
+    expectedAppBase+
+    '?pt=qr'+
+    '&qv='+encodeURIComponent(qv)+
+    '&job='+encodeURIComponent(jobId)+
+    '&sig='+encodeURIComponent(sig);
+
+  return{
+    ok:true,
+    raw:safeRaw,
+    originalRaw:raw,
+    originalBase:base,
+    targetBase:expectedAppBase,
+    deploymentRebased:deploymentRebased,
+    jobId:jobId,
+    qv:qv,
+    sig:sig
+  };
 }
 
 function loadScript(src){
@@ -545,7 +564,12 @@ function handleDecoded(text,source){
   running=false;
   clearTimeout(loopTimer);
   showDetected(parsed);
-  setStatus('✅ อ่านสำเร็จ '+parsed.jobId+' — กำลังกลับเข้า Procurement Tracker เพื่อตรวจ Signature และสิทธิ์…','ok');
+  setStatus(
+    parsed.deploymentRebased
+      ? '✅ อ่านสำเร็จ '+parsed.jobId+' — พบ QR จาก Deployment เดิม ระบบกำลังย้ายไป Web App ปัจจุบันเพื่อตรวจ Signature และสิทธิ์…'
+      : '✅ อ่านสำเร็จ '+parsed.jobId+' — กำลังกลับเข้า Procurement Tracker เพื่อตรวจ Signature และสิทธิ์…',
+    'ok'
+  );
 
   stopTracks();
 

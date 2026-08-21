@@ -64,12 +64,12 @@
     <header class="head">
       <h1>📷 สแกน QR งานด้วยกล้อง</h1>
       <div class="sub">
-        รุ่น Hybrid Decoder ใช้กล้องโดยตรงผ่าน getUserMedia และอ่าน QR ด้วย Native BarcodeDetector ก่อน
-        ถ้า Browser ไม่รองรับจะใช้ jsQR สำรอง ไม่พึ่งตัว Live Decoder ของ html5-qrcode
+        เปิดหน้านี้แล้วระบบจะขอสิทธิ์และเปิดกล้องอัตโนมัติ จากนั้นสแกน QR ทันที
+        ใช้ Native BarcodeDetector ก่อน และใช้ jsQR สำรองเมื่อ Browser ไม่รองรับ
       </div>
     </header>
 
-    <div id="status" class="status">พร้อม — กด “เปิดกล้อง” เพื่อเริ่มสแกน</div>
+    <div id="status" class="status">กำลังเตรียมกล้องอัตโนมัติ…</div>
     <div class="chips">
       <span id="httpsChip" class="chip">HTTPS</span>
       <span id="mediaChip" class="chip">Camera API</span>
@@ -79,7 +79,7 @@
 
     <div class="reader-wrap">
       <div class="reader-shell">
-        <div id="cameraPlaceholder">กล้องยังไม่เปิด</div>
+        <div id="cameraPlaceholder">กำลังเปิดกล้อง…</div>
         <video id="cameraVideo" playsinline muted></video>
         <div id="scanGuide" class="scan-guide"><div class="scan-guide-inner"></div></div>
         <div id="guideLabel" class="guide-label">กำลังอ่าน QR ต่อเนื่อง</div>
@@ -93,8 +93,6 @@
     </div>
 
     <div class="controls">
-      <button id="startBtn" class="primary" type="button">📷 เปิดกล้อง</button>
-      <button id="stopBtn" type="button" disabled>■ ปิดกล้อง</button>
       <button id="torchBtn" type="button" style="display:none">🔦 เปิดไฟ</button>
       <select id="cameraSelect" aria-label="เลือกกล้อง" style="display:none"></select>
     </div>
@@ -119,13 +117,13 @@
         <button id="openPasteBtn" type="button">ตรวจและเปิด</button>
       </div>
       <div class="help">
-        เมื่อสแกนสำเร็จ ระบบจะใส่ Signed QR URL ลงช่องด้านบนก่อน แล้วให้กด “ตรวจและเปิด” เพื่อเข้า JOB หากเปิดผ่าน LINE แล้วกล้องถูกปฏิเสธ
-        ให้เปิดด้วย Chrome/Browser ภายนอก สำหรับ Live Scan แนะนำให้ QR กินพื้นที่ประมาณ 40–70% ของภาพและถือให้นิ่ง
+        เมื่อเปิดหน้านี้ระบบจะเปิดกล้องและเริ่มสแกนอัตโนมัติ เมื่ออ่านสำเร็จ Signed QR URL จะขึ้นในช่องด้านบน แล้วให้กด “ตรวจและเปิด” เพื่อเข้า JOB
+        หากเปิดผ่าน LINE แล้วกล้องถูกปฏิเสธ ให้เปิดด้วย Chrome/Browser ภายนอก สำหรับ Live Scan แนะนำให้ QR กินพื้นที่ประมาณ 40–70% ของภาพและถือให้นิ่ง
       </div>
       <div id="diag" class="diag"></div>
     </div>
   </section>
-  <div class="foot">PT-V4.10.9A.6-DECODE-TO-FIELD</div>
+  <div class="foot">PT-V4.10.9A.7-AUTO-CAMERA</div>
 </main>
 
 <canvas id="workCanvas"></canvas>
@@ -134,7 +132,7 @@
 (function(){
 'use strict';
 
-var VERSION='PT-V4.10.9A.6-DECODE-TO-FIELD';
+var VERSION='PT-V4.10.9A.7-AUTO-CAMERA';
 var JSQR_URLS=[
   'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js',
   'https://unpkg.com/jsqr@1.4.0/dist/jsQR.js'
@@ -147,8 +145,6 @@ var loopTimer=null,lastDecodeAt=0,jsQrPromise=null;
 
 var video=document.getElementById('cameraVideo');
 var placeholder=document.getElementById('cameraPlaceholder');
-var startBtn=document.getElementById('startBtn');
-var stopBtn=document.getElementById('stopBtn');
 var torchBtn=document.getElementById('torchBtn');
 var cameraSelect=document.getElementById('cameraSelect');
 var zoomWrap=document.getElementById('zoomWrap');
@@ -211,7 +207,6 @@ function initExpectedApp(){
     return true;
   }catch(err){
     setStatus('เปิด Scanner ไม่สมบูรณ์: '+(err&&err.message?err.message:err),'err');
-    startBtn.disabled=true;
     openPasteBtn.disabled=true;
     return false;
   }
@@ -509,8 +504,6 @@ async function startCamera(deviceId){
     renderCameraSelect(currentId);
 
     running=true;
-    startBtn.disabled=true;
-    stopBtn.disabled=false;
     busy=false;
 
     setStatus('กล้องพร้อม — กำลังอ่านด้วย '+decoderName+' ให้ QR อยู่กลางภาพและถือให้นิ่ง','ok');
@@ -519,9 +512,7 @@ async function startCamera(deviceId){
     busy=false;
     running=false;
     stopTracks();
-    startBtn.disabled=false;
-    stopBtn.disabled=true;
-    setStatus('เปิดกล้องไม่สำเร็จ: '+(err&&err.message?err.message:String(err)),'err');
+    setStatus('เปิดกล้องอัตโนมัติไม่สำเร็จ: '+(err&&err.message?err.message:String(err))+' — ตรวจสิทธิ์กล้องแล้วรีเฟรชหน้านี้','err');
     showDiag(err,'startCamera');
   }
 }
@@ -536,14 +527,12 @@ function stopCamera(){
   placeholder.style.display='';
   scanGuide.style.display='none';
   guideLabel.style.display='none';
-  startBtn.disabled=false;
-  stopBtn.disabled=true;
   torchBtn.style.display='none';
   zoomWrap.style.display='none';
   qualityInfo.textContent='กล้องจริง: รอเปิดกล้อง';
   torchOn=false;
   torchBtn.textContent='🔦 เปิดไฟ';
-  if(!busy)setStatus('ปิดกล้องแล้ว','');
+  if(!busy)setStatus('กำลังสลับ/เตรียมกล้อง…','');
 }
 
 function showDetected(parsed){
@@ -671,9 +660,6 @@ async function scanImage(file){
   }
 }
 
-startBtn.addEventListener('click',function(){startCamera('');});
-stopBtn.addEventListener('click',stopCamera);
-
 cameraSelect.addEventListener('change',function(){
   var id=cameraSelect.value;
   if(!id)return;
@@ -716,12 +702,30 @@ pasteInput.addEventListener('keydown',function(ev){
 
 window.addEventListener('pagehide',function(){stopTracks();});
 
+async function autoStartCameraV4109_(){
+  if(!expectedAppBase)return;
+
+  if(!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)){
+    setStatus('Browser นี้ไม่รองรับ Camera API กรุณาเปิดด้วย Chrome/Browser ภายนอก','err');
+    return;
+  }
+
+  setStatus('กำลังขอสิทธิ์และเปิดกล้องอัตโนมัติ…','');
+  await startCamera('');
+}
+
 updateEnvironment();
-initExpectedApp();
-initDecoder().catch(function(err){
-  setChip('decoderChip',false,'Decoder ยังไม่พร้อม');
-  showDiag(err,'initDecoder');
-});
+if(initExpectedApp()){
+  initDecoder()
+    .then(function(){
+      setTimeout(function(){ autoStartCameraV4109_(); },120);
+    })
+    .catch(function(err){
+      setChip('decoderChip',false,'Decoder ยังไม่พร้อม');
+      setStatus('เตรียมตัวอ่าน QR ไม่สำเร็จ: '+(err&&err.message?err.message:String(err)),'err');
+      showDiag(err,'initDecoder');
+    });
+}
 
 })();
 </script>
